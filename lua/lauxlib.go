@@ -9,10 +9,12 @@ import "C"
 import "unsafe"
 
 type LuaError struct {
-	code int
-	message string
+	code       int
+	message    string
 	stackTrace []LuaStackEntry
 }
+
+type Reg map[string]LuaGoFunction
 
 func (err *LuaError) Error() string {
 	return err.message
@@ -95,7 +97,7 @@ func (L *State) DoFile(filename string) error {
 	if r := L.LoadFile(filename); r != 0 {
 		return &LuaError{r, L.ToString(-1), L.StackTrace()}
 	}
-	return L.Call(0, LUA_MULTRET);
+	return L.Call(0, LUA_MULTRET)
 }
 
 // Executes the string, returns nil for no errors or the lua error string on failure
@@ -155,6 +157,12 @@ func (L *State) LoadString(s string) int {
 	return int(C.luaL_loadstring(L.s, Cs))
 }
 
+// luaL_newlib
+func (L *State) NewLib(l Reg) {
+	L.CreateTable(0, len(l))
+	L.SetFuncs(l)
+}
+
 // luaL_newmetatable
 func (L *State) NewMetaTable(tname string) bool {
 	Ctname := C.CString(tname)
@@ -203,6 +211,41 @@ func (L *State) LTypename(index int) string {
 	return C.GoString(C.lua_typename(L.s, C.lua_type(L.s, C.int(index))))
 }
 
+// luaL_requiref
+func (L *State) Requiref(modname string, openf LuaGoFunction, glb bool) error {
+	L.PushGoFunction(openf)
+	L.PushString(modname)
+	if err := L.Call(1, 1); err != nil {
+		return err
+	}
+
+	Cname := C.CString("_LOADED")
+	defer C.free(unsafe.Pointer(Cname))
+	C.luaL_getsubtable(L.s, C.LUA_REGISTRYINDEX, Cname)
+
+	L.PushValue(-2)
+	L.SetField(-2, modname)
+	L.Pop(1)
+
+	if glb {
+		L.RawGeti(C.LUA_REGISTRYINDEX, C.LUA_RIDX_GLOBALS)
+		L.PushValue(-2)
+		L.SetField(-2, modname)
+		L.Pop(1)
+	}
+
+	return nil
+}
+
+// luaL_setfuncs
+// NOTE: omitting upvalues since Go supports them
+func (L *State) SetFuncs(l Reg) {
+	for k, v := range l {
+		L.PushGoFunction(v)
+		L.SetField(-2, k)
+	}
+}
+
 // luaL_unref
 func (L *State) Unref(t int, ref int) {
 	C.luaL_unref(L.s, C.int(t), C.int(ref))
@@ -212,4 +255,3 @@ func (L *State) Unref(t int, ref int) {
 func (L *State) Where(lvl int) {
 	C.luaL_where(L.s, C.int(lvl))
 }
-

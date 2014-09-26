@@ -6,9 +6,9 @@ import (
 )
 
 type TestStruct struct {
-	IntField int
+	IntField    int
 	StringField string
-	FloatField float64
+	FloatField  float64
 }
 
 func TestGoStruct(t *testing.T) {
@@ -16,7 +16,7 @@ func TestGoStruct(t *testing.T) {
 	L.OpenLibs()
 	defer L.Close()
 
-	ts := &TestStruct{10, "test", 2.3 }
+	ts := &TestStruct{10, "test", 2.3}
 
 	L.CheckStack(1)
 
@@ -24,10 +24,14 @@ func TestGoStruct(t *testing.T) {
 	L.SetGlobal("t")
 
 	L.GetGlobal("t")
-	if !L.IsGoStruct(-1) { t.Fatal("Not go struct") }
+	if !L.IsGoStruct(-1) {
+		t.Fatal("Not go struct")
+	}
 
 	tsr := L.ToGoStruct(-1).(*TestStruct)
-	if tsr != ts { t.Fatal("Retrieved something different from what we inserted") }
+	if tsr != ts {
+		t.Fatal("Retrieved something different from what we inserted")
+	}
 
 	L.Pop(1)
 
@@ -95,7 +99,7 @@ func TestCall(t *testing.T) {
 	L.OpenLibs()
 	defer L.Close()
 
-	test := func (L *State) int {
+	test := func(L *State) int {
 		arg1 := L.ToString(1)
 		arg2 := L.ToString(2)
 		arg3 := L.ToString(3)
@@ -171,7 +175,7 @@ func TestLikeBasic(t *testing.T) {
 
 	L.GetGlobal("print")
 	L.PushString("Hello World!")
-	if err := L.Call(1,0); err != nil {
+	if err := L.Call(1, 0); err != nil {
 		t.Fatalf("Call to print returned error")
 	}
 
@@ -180,24 +184,24 @@ func TestLikeBasic(t *testing.T) {
 	L.PushGoFunction(test)
 	L.PushGoFunction(test2)
 	L.PushInteger(42)
-	if err := L.Call(1,0); err != nil {
+	if err := L.Call(1, 0); err != nil {
 		t.Fatalf("Call to print returned error")
 	}
 	if (test2Arg != 42) || (test2Argfrombottom != 42) {
 		t.Fatalf("Call to test2 didn't work")
 	}
 
-	if err := L.Call(0,0); err != nil {
+	if err := L.Call(0, 0); err != nil {
 		t.Fatalf("Call to print returned error")
 	}
-	if err := L.Call(0,0); err != nil {
+	if err := L.Call(0, 0); err != nil {
 		t.Fatalf("Call to print returned error")
 	}
-	if err := L.Call(0,0); err != nil {
+	if err := L.Call(0, 0); err != nil {
 		t.Fatalf("Call to print returned error")
 	}
 	if testCalled != 3 {
-		t.Fatalf("Test function not called the correct number of times: %d\n", testCalled);
+		t.Fatalf("Test function not called the correct number of times: %d\n", testCalled)
 	}
 
 	// this will fail as we didn't register test2 function
@@ -232,18 +236,18 @@ func TestLikeQuickstart(t *testing.T) {
 // equivalent to userdata.go
 func TestLikeUserdata(t *testing.T) {
 	type Userdata struct {
-		a,b int
+		a, b int
 	}
 
 	userDataProper := func(L *State) {
-		rawptr := L.NewUserdata(uintptr(unsafe.Sizeof(Userdata{})));
-		var ptr *Userdata;
-		ptr = (*Userdata)(rawptr);
-		ptr.a = 2;
-		ptr.b = 3;
+		rawptr := L.NewUserdata(uintptr(unsafe.Sizeof(Userdata{})))
+		var ptr *Userdata
+		ptr = (*Userdata)(rawptr)
+		ptr.a = 2
+		ptr.b = 3
 
-		rawptr2 := L.ToUserdata(-1);
-		ptr2 := (*Userdata)(rawptr2);
+		rawptr2 := L.ToUserdata(-1)
+		ptr2 := (*Userdata)(rawptr2)
 
 		if ptr != ptr2 {
 			t.Fatalf("Failed to create userdata\n")
@@ -274,7 +278,7 @@ func TestLikeUserdata(t *testing.T) {
 			t.Fatalf("Error executing test function: %v\n", err)
 		}
 		if testCalled != 1 {
-			t.Fatalf("It appears the test function wasn't actually called\n");
+			t.Fatalf("It appears the test function wasn't actually called\n")
 		}
 	}
 
@@ -389,5 +393,65 @@ func TestConv(t *testing.T) {
 	s = L.ToString(-1)
 	if s != "a\000test" {
 		t.Fatalf("Wrong conversion (str -> str): <%s>", s)
+	}
+}
+
+func TestModule(t *testing.T) {
+	L := NewState()
+	defer L.Close()
+
+	L.OpenLibs()
+
+	testReg := map[string]LuaGoFunction{
+		"testFunc1": func(L *State) int {
+			L.PushString("testResult1")
+			return 1
+		},
+		"testFunc2": func(L *State) int {
+			L.PushString("testResult2")
+			return 1
+		},
+	}
+
+	// "load" testModule without registering globally
+	L.Requiref("testModule",
+		func(L *State) int { L.NewLib(testReg); return 1 },
+		false)
+	L.Pop(1)
+
+	// test lack of global module
+	L.LoadString("return testModule.testFunc1()")
+	if err := L.Call(0, 1); err == nil {
+		t.Fatal("print(testModule) should generate compile error")
+	}
+
+	// test 5.2 require
+	L.LoadString(`
+		tm = require 'testModule'
+		return tm.testFunc1()
+	`)
+
+	if err := L.Call(0, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if L.ToString(-1) != "testResult1" {
+		t.Fatalf("L.ToString(-1) = %q want %q", L.ToString(-1), "testResult1")
+	}
+
+	// "load" testModule again, this time as a global module
+	L.Requiref("testModule",
+		func(L *State) int { L.NewLib(testReg); return 1 },
+		true)
+	L.Pop(1)
+
+	// test global module
+	L.LoadString("return testModule.testFunc2()")
+	if err := L.Call(0, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if L.ToString(-1) != "testResult2" {
+		t.Fatalf("L.ToString(-1) = %q want %q", L.ToString(-1), "testResult2")
 	}
 }
